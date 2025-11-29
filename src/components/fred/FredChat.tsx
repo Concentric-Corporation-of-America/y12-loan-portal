@@ -329,8 +329,10 @@ export function FredChat({ executiveEmail, executiveName, executiveRole }: FredC
     const newHistory = [...conversationHistory, { role: 'user' as const, content: query }];
     
     try {
-      // Get Supabase URL from environment
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rbmotycxvspzeudwhrqi.supabase.co';
+      // Get Supabase URL from environment - use hardcoded URL to ensure it works
+      const supabaseUrl = 'https://rbmotycxvspzeudwhrqi.supabase.co';
+      console.log('FRED: Calling API at', `${supabaseUrl}/functions/v1/fred-ai`);
+      console.log('FRED: Executive email:', executiveEmail);
       
       const response = await fetch(`${supabaseUrl}/functions/v1/fred-ai`, {
         method: 'POST',
@@ -345,15 +347,19 @@ export function FredChat({ executiveEmail, executiveName, executiveRole }: FredC
         }),
       });
 
+      console.log('FRED: Response status:', response.status, response.ok);
+
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('FRED: Response data:', data);
       
       if (data.success && data.message) {
         // Update conversation history
         setConversationHistory([...newHistory, { role: 'assistant', content: data.message }]);
+        console.log('FRED: Returning AI response');
         return data.message;
       } else {
         throw new Error(data.error || 'Unknown error');
@@ -362,6 +368,7 @@ export function FredChat({ executiveEmail, executiveName, executiveRole }: FredC
       console.error('FRED AI error:', error);
       
       // Fallback to sample responses if API fails
+      console.log('FRED: Falling back to sample response');
       return getFallbackResponse(query);
     }
   };
