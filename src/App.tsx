@@ -46,8 +46,14 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  // For demo purposes, allow all authenticated users to access admin
-  // In production, check user role from database
+  // Check if user has admin role in user_metadata
+  const userRole = (user as { user_metadata?: { role?: string } })?.user_metadata?.role;
+  const isAdmin = userRole === 'admin' || userRole === 'loan_officer' || userRole === 'underwriter';
+
+  if (!isAdmin) {
+    return <Navigate to="/member/dashboard" replace />;
+  }
+
   return <>{children}</>;
 }
 

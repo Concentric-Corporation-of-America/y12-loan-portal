@@ -6,6 +6,16 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
   FileText,
   DollarSign,
   TrendingUp,
@@ -14,13 +24,12 @@ import {
   XCircle,
   Search,
   Filter,
-  Eye,
-  UserCheck,
   AlertTriangle,
   BarChart3,
   Loader2,
 } from 'lucide-react';
 import { supabase } from '@/services/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface PendingApplication {
   id: string;
@@ -93,6 +102,7 @@ function getLoanTypeName(type: string): string {
 }
 
 export function AdminDashboard() {
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -107,6 +117,15 @@ export function AdminDashboard() {
     approvalRate: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Decision dialog state
+  const [selectedApp, setSelectedApp] = useState<PendingApplication | null>(null);
+  const [decisionDialogOpen, setDecisionDialogOpen] = useState(false);
+  const [decisionType, setDecisionType] = useState<'approve' | 'deny' | null>(null);
+  const [approvedRate, setApprovedRate] = useState('');
+  const [denialReason, setDenialReason] = useState('');
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -256,6 +275,82 @@ export function AdminDashboard() {
     const matchesType = typeFilter === 'all' || app.loan_type.toLowerCase().includes(typeFilter.toLowerCase());
     return matchesSearch && matchesStatus && matchesType;
   });
+
+  // Open decision dialog
+  const openDecisionDialog = (app: PendingApplication, type: 'approve' | 'deny') => {
+    setSelectedApp(app);
+    setDecisionType(type);
+    setApprovedRate(type === 'approve' ? '10.99' : '');
+    setDenialReason('');
+    setDecisionNotes('');
+    setDecisionDialogOpen(true);
+  };
+
+  // Handle decision submission
+  const handleDecisionSubmit = async () => {
+    if (!selectedApp || !decisionType || !user) return;
+
+    setIsSubmitting(true);
+    try {
+      const updateData: Record<string, unknown> = {
+        status: decisionType === 'approve' ? 'approved' : 'denied',
+        decision_date: new Date().toISOString(),
+        decided_by: user.id,
+        decision_notes: decisionNotes || null,
+      };
+
+      if (decisionType === 'approve') {
+        updateData.approved_rate = parseFloat(approvedRate) || null;
+      } else {
+        updateData.denial_reason = denialReason || null;
+      }
+
+      const { error } = await supabase
+        .from('loan_applications')
+        .update(updateData)
+        .eq('id', selectedApp.id);
+
+      if (error) {
+        console.error('Error updating application:', error);
+        return;
+      }
+
+      // Update local state
+      setPendingApplications((prev) => prev.filter((app) => app.id !== selectedApp.id));
+      
+      // Add to recent decisions
+      setRecentDecisions((prev) => [
+        {
+          id: selectedApp.id,
+          member_name: selectedApp.member_name,
+          loan_type: selectedApp.loan_type,
+          amount: selectedApp.amount,
+          status: decisionType === 'approve' ? 'approved' : 'denied',
+          decision_date: new Date().toISOString(),
+          decided_by: 'You',
+          approved_rate: decisionType === 'approve' ? parseFloat(approvedRate) : undefined,
+          denial_reason: decisionType === 'deny' ? denialReason : undefined,
+        },
+        ...prev,
+      ]);
+
+      // Update stats
+      setStats((prev) => ({
+        ...prev,
+        pendingReview: prev.pendingReview - 1,
+        approvedThisMonth: decisionType === 'approve' ? prev.approvedThisMonth + 1 : prev.approvedThisMonth,
+      }));
+
+      // Close dialog
+      setDecisionDialogOpen(false);
+      setSelectedApp(null);
+      setDecisionType(null);
+    } catch (error) {
+      console.error('Error submitting decision:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -464,13 +559,23 @@ export function AdminDashboard() {
                           </td>
                           <td className="py-4 px-4 text-right">
                             <div className="flex justify-end gap-2">
-                              <Button variant="outline" size="sm">
-                                <Eye className="mr-1 h-4 w-4" />
-                                Review
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => openDecisionDialog(app, 'approve')}
+                                className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                              >
+                                <CheckCircle className="mr-1 h-4 w-4" />
+                                Approve
                               </Button>
-                              <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90">
-                                <UserCheck className="mr-1 h-4 w-4" />
-                                Decide
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => openDecisionDialog(app, 'deny')}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <XCircle className="mr-1 h-4 w-4" />
+                                Deny
                               </Button>
                             </div>
                           </td>
@@ -607,6 +712,108 @@ export function AdminDashboard() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Decision Dialog */}
+      <Dialog open={decisionDialogOpen} onOpenChange={setDecisionDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>
+              {decisionType === 'approve' ? 'Approve' : 'Deny'} Loan Application
+            </DialogTitle>
+            <DialogDescription>
+              {selectedApp && (
+                <>
+                  {selectedApp.member_name} - {getLoanTypeName(selectedApp.loan_type)} for{' '}
+                  {formatCurrency(selectedApp.amount)}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {decisionType === 'approve' && (
+              <div className="space-y-2">
+                <Label htmlFor="approvedRate">Approved Interest Rate (%)</Label>
+                <Input
+                  id="approvedRate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="30"
+                  value={approvedRate}
+                  onChange={(e) => setApprovedRate(e.target.value)}
+                  placeholder="e.g., 10.99"
+                />
+              </div>
+            )}
+
+            {decisionType === 'deny' && (
+              <div className="space-y-2">
+                <Label htmlFor="denialReason">Denial Reason</Label>
+                <Select value={denialReason} onValueChange={setDenialReason}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="insufficient_credit">Insufficient Credit Score</SelectItem>
+                    <SelectItem value="high_dti">High Debt-to-Income Ratio</SelectItem>
+                    <SelectItem value="insufficient_income">Insufficient Income</SelectItem>
+                    <SelectItem value="employment_verification">Employment Verification Failed</SelectItem>
+                    <SelectItem value="incomplete_application">Incomplete Application</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="decisionNotes">Notes (Optional)</Label>
+              <Textarea
+                id="decisionNotes"
+                value={decisionNotes}
+                onChange={(e) => setDecisionNotes(e.target.value)}
+                placeholder="Add any additional notes about this decision..."
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDecisionDialogOpen(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDecisionSubmit}
+              disabled={isSubmitting || (decisionType === 'approve' && !approvedRate) || (decisionType === 'deny' && !denialReason)}
+              className={
+                decisionType === 'approve'
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-red-600 hover:bg-red-700'
+              }
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  {decisionType === 'approve' ? (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  ) : (
+                    <XCircle className="mr-2 h-4 w-4" />
+                  )}
+                  {decisionType === 'approve' ? 'Approve Application' : 'Deny Application'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
