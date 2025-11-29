@@ -11,6 +11,7 @@ import { MemberApplicationsPage } from '@/pages/member/Applications';
 import { LoanApplicationPage } from '@/pages/member/LoanApplication';
 import { MemberProfilePage } from '@/pages/member/Profile';
 import { AdminDashboard } from '@/pages/admin/Dashboard';
+import { FredPage } from '@/pages/Fred';
 import { Toaster } from '@/components/ui/sonner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -108,6 +109,16 @@ function AppRoutes() {
             <ProtectedRoute>
               <MemberProfilePage />
             </ProtectedRoute>
+          }
+        />
+
+        {/* FRED AI Assistant - Executive Only */}
+        <Route
+          path="/fred"
+          element={
+            <AdminRoute>
+              <FredPage />
+            </AdminRoute>
           }
         />
 
