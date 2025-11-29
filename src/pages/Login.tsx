@@ -28,7 +28,7 @@ export function LoginPage() {
       } else {
         navigate('/member/dashboard');
       }
-    } catch (err) {
+    } catch {
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);

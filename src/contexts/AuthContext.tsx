@@ -3,7 +3,8 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabase';
 
 // Demo mode flag - enables demo authentication when Supabase is unavailable
-const DEMO_MODE = true;
+// Set to false to use real Supabase authentication
+const DEMO_MODE = false;
 
 interface DemoUser {
   id: string;

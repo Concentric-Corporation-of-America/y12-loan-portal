@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,94 +18,45 @@ import {
   UserCheck,
   AlertTriangle,
   BarChart3,
+  Loader2,
 } from 'lucide-react';
+import { supabase } from '@/services/supabase';
 
-const mockPendingApplications = [
-  {
-    id: '1',
-    memberName: 'John Smith',
-    memberEmail: 'john.smith@email.com',
-    type: 'Home Loan',
-    amount: 250000,
-    term: 360,
-    status: 'under_review',
-    submittedDate: '2025-11-20',
-    creditScore: 720,
-    annualIncome: 85000,
-    dti: 32,
-  },
-  {
-    id: '2',
-    memberName: 'Sarah Johnson',
-    memberEmail: 'sarah.j@email.com',
-    type: 'Auto Loan',
-    amount: 45000,
-    term: 60,
-    status: 'submitted',
-    submittedDate: '2025-11-25',
-    creditScore: 680,
-    annualIncome: 62000,
-    dti: 28,
-  },
-  {
-    id: '3',
-    memberName: 'Michael Brown',
-    memberEmail: 'm.brown@email.com',
-    type: 'Personal Loan',
-    amount: 15000,
-    term: 36,
-    status: 'submitted',
-    submittedDate: '2025-11-28',
-    creditScore: 750,
-    annualIncome: 95000,
-    dti: 22,
-  },
-  {
-    id: '4',
-    memberName: 'Emily Davis',
-    memberEmail: 'emily.d@email.com',
-    type: 'Business Loan',
-    amount: 100000,
-    term: 84,
-    status: 'under_review',
-    submittedDate: '2025-11-18',
-    creditScore: 695,
-    annualIncome: 120000,
-    dti: 35,
-  },
-];
+interface PendingApplication {
+  id: string;
+  member_id: string;
+  member_name: string;
+  member_email: string;
+  loan_type: string;
+  amount: number;
+  term_months: number;
+  status: string;
+  created_at: string;
+  credit_score?: number;
+  annual_income?: number;
+  debt_to_income_ratio?: number;
+}
 
-const mockRecentDecisions = [
-  {
-    id: '5',
-    memberName: 'Robert Wilson',
-    type: 'Auto Loan',
-    amount: 35000,
-    status: 'approved',
-    decisionDate: '2025-11-27',
-    decidedBy: 'Admin User',
-    approvedRate: 5.49,
-  },
-  {
-    id: '6',
-    memberName: 'Lisa Anderson',
-    type: 'Personal Loan',
-    amount: 8000,
-    status: 'denied',
-    decisionDate: '2025-11-26',
-    decidedBy: 'Admin User',
-    denialReason: 'High DTI ratio',
-  },
-];
+interface RecentDecision {
+  id: string;
+  member_name: string;
+  loan_type: string;
+  amount: number;
+  status: string;
+  decision_date: string;
+  decided_by: string;
+  approved_rate?: number;
+  denial_reason?: string;
+}
 
-const stats = {
-  totalApplications: 156,
-  pendingReview: 4,
-  approvedThisMonth: 42,
-  totalFunded: 2850000,
-  averageProcessingTime: 2.3,
-  approvalRate: 78,
-};
+interface Stats {
+  totalApplications: number;
+  pendingReview: number;
+  approvedThisMonth: number;
+  totalFunded: number;
+  averageProcessingTime: number;
+  approvalRate: number;
+}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -123,25 +74,196 @@ function formatDate(dateString: string): string {
   });
 }
 
-function getRiskLevel(creditScore: number, dti: number) {
-  if (creditScore >= 720 && dti <= 30) return { level: 'Low', color: 'text-green-600 bg-green-500/10' };
-  if (creditScore >= 660 && dti <= 40) return { level: 'Medium', color: 'text-yellow-600 bg-yellow-500/10' };
+function getRiskLevel(creditScore: number | undefined, dti: number | undefined) {
+  const score = creditScore || 650;
+  const ratio = dti || 35;
+  if (score >= 720 && ratio <= 30) return { level: 'Low', color: 'text-green-600 bg-green-500/10' };
+  if (score >= 660 && ratio <= 40) return { level: 'Medium', color: 'text-yellow-600 bg-yellow-500/10' };
   return { level: 'High', color: 'text-red-600 bg-red-500/10' };
+}
+
+function getLoanTypeName(type: string): string {
+  const typeNames: Record<string, string> = {
+    personal: 'Personal Loan',
+    auto: 'Auto Loan',
+    home: 'Home Loan',
+    business: 'Business Loan',
+  };
+  return typeNames[type] || type;
 }
 
 export function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [pendingApplications, setPendingApplications] = useState<PendingApplication[]>([]);
+  const [recentDecisions, setRecentDecisions] = useState<RecentDecision[]>([]);
+  const [stats, setStats] = useState<Stats>({
+    totalApplications: 0,
+    pendingReview: 0,
+    approvedThisMonth: 0,
+    totalFunded: 0,
+    averageProcessingTime: 2.3,
+    approvalRate: 0,
+  });
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredApplications = mockPendingApplications.filter((app) => {
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        // Fetch pending applications with member info
+        const { data: pendingData } = await supabase
+          .from('loan_applications')
+          .select(`
+            id,
+            member_id,
+            loan_type,
+            amount,
+            term_months,
+            status,
+            created_at,
+            credit_score,
+            annual_income,
+            debt_to_income_ratio,
+            members (
+              first_name,
+              last_name,
+              email
+            )
+          `)
+          .in('status', ['submitted', 'under_review'])
+          .order('created_at', { ascending: false });
+
+        if (pendingData) {
+          const formattedPending = pendingData.map((app: Record<string, unknown>) => {
+            const member = app.members as { first_name?: string; last_name?: string; email?: string } | null;
+            return {
+              id: app.id as string,
+              member_id: app.member_id as string,
+              member_name: member ? `${member.first_name || ''} ${member.last_name || ''}`.trim() : 'Unknown',
+              member_email: member?.email || 'N/A',
+              loan_type: app.loan_type as string,
+              amount: app.amount as number,
+              term_months: app.term_months as number,
+              status: app.status as string,
+              created_at: app.created_at as string,
+              credit_score: app.credit_score as number | undefined,
+              annual_income: app.annual_income as number | undefined,
+              debt_to_income_ratio: app.debt_to_income_ratio as number | undefined,
+            };
+          });
+          setPendingApplications(formattedPending);
+        }
+
+        // Fetch recent decisions (approved or denied)
+        const { data: decisionsData } = await supabase
+          .from('loan_applications')
+          .select(`
+            id,
+            loan_type,
+            amount,
+            status,
+            decision_date,
+            approved_rate,
+            denial_reason,
+            members (
+              first_name,
+              last_name
+            )
+          `)
+          .in('status', ['approved', 'denied'])
+          .order('decision_date', { ascending: false })
+          .limit(10);
+
+        if (decisionsData) {
+          const formattedDecisions = decisionsData.map((dec: Record<string, unknown>) => {
+            const member = dec.members as { first_name?: string; last_name?: string } | null;
+            return {
+              id: dec.id as string,
+              member_name: member ? `${member.first_name || ''} ${member.last_name || ''}`.trim() : 'Unknown',
+              loan_type: dec.loan_type as string,
+              amount: dec.amount as number,
+              status: dec.status as string,
+              decision_date: (dec.decision_date || dec.created_at) as string,
+              decided_by: 'Admin',
+              approved_rate: dec.approved_rate as number | undefined,
+              denial_reason: dec.denial_reason as string | undefined,
+            };
+          });
+          setRecentDecisions(formattedDecisions);
+        }
+
+        // Calculate stats
+        const { count: totalCount } = await supabase
+          .from('loan_applications')
+          .select('*', { count: 'exact', head: true });
+
+        const { count: pendingCount } = await supabase
+          .from('loan_applications')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['submitted', 'under_review']);
+
+        // Get approved this month
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+
+        const { count: approvedCount } = await supabase
+          .from('loan_applications')
+          .select('*', { count: 'exact', head: true })
+          .eq('status', 'approved')
+          .gte('decision_date', startOfMonth.toISOString());
+
+        // Get total funded this month
+        const { data: fundedData } = await supabase
+          .from('loans')
+          .select('original_amount')
+          .gte('created_at', startOfMonth.toISOString());
+
+        const totalFunded = fundedData?.reduce((sum, loan) => sum + (loan.original_amount || 0), 0) || 0;
+
+        // Calculate approval rate
+        const { count: totalDecided } = await supabase
+          .from('loan_applications')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['approved', 'denied']);
+
+        const approvalRate = totalDecided && approvedCount ? Math.round((approvedCount / totalDecided) * 100) : 0;
+
+        setStats({
+          totalApplications: totalCount || 0,
+          pendingReview: pendingCount || 0,
+          approvedThisMonth: approvedCount || 0,
+          totalFunded,
+          averageProcessingTime: 2.3,
+          approvalRate,
+        });
+      } catch (error) {
+        console.error('Error fetching admin data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
+  const filteredApplications = pendingApplications.filter((app) => {
     const matchesSearch =
-      app.memberName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      app.memberEmail.toLowerCase().includes(searchTerm.toLowerCase());
+      app.member_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      app.member_email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
-    const matchesType = typeFilter === 'all' || app.type.toLowerCase().includes(typeFilter.toLowerCase());
+    const matchesType = typeFilter === 'all' || app.loan_type.toLowerCase().includes(typeFilter.toLowerCase());
     return matchesSearch && matchesStatus && matchesType;
   });
+
+  if (isLoading) {
+    return (
+      <div className="container py-8 flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8">
@@ -217,7 +339,7 @@ export function AdminDashboard() {
         <TabsList>
           <TabsTrigger value="pending" className="gap-2">
             <Clock className="h-4 w-4" />
-            Pending Applications ({mockPendingApplications.length})
+            Pending Applications ({pendingApplications.length})
           </TabsTrigger>
           <TabsTrigger value="recent" className="gap-2">
             <FileText className="h-4 w-4" />
@@ -283,26 +405,26 @@ export function AdminDashboard() {
                   </thead>
                   <tbody>
                     {filteredApplications.map((app) => {
-                      const risk = getRiskLevel(app.creditScore, app.dti);
+                      const risk = getRiskLevel(app.credit_score, app.debt_to_income_ratio);
                       return (
                         <tr key={app.id} className="border-b hover:bg-muted/30">
                           <td className="py-4 px-4">
                             <div>
-                              <div className="font-medium">{app.memberName}</div>
-                              <div className="text-sm text-muted-foreground">{app.memberEmail}</div>
+                              <div className="font-medium">{app.member_name}</div>
+                              <div className="text-sm text-muted-foreground">{app.member_email}</div>
                               <div className="text-xs text-muted-foreground mt-1">
-                                Submitted {formatDate(app.submittedDate)}
+                                Submitted {formatDate(app.created_at)}
                               </div>
                             </div>
                           </td>
                           <td className="py-4 px-4">
                             <div>
-                              <div className="font-medium">{app.type}</div>
+                              <div className="font-medium">{getLoanTypeName(app.loan_type)}</div>
                               <div className="text-lg font-bold text-primary">
                                 {formatCurrency(app.amount)}
                               </div>
                               <div className="text-sm text-muted-foreground">
-                                {app.term} months
+                                {app.term_months} months
                               </div>
                             </div>
                           </td>
@@ -310,15 +432,15 @@ export function AdminDashboard() {
                             <div className="space-y-1">
                               <div className="text-sm">
                                 <span className="text-muted-foreground">Score: </span>
-                                <span className="font-medium">{app.creditScore}</span>
+                                <span className="font-medium">{app.credit_score || 'N/A'}</span>
                               </div>
                               <div className="text-sm">
                                 <span className="text-muted-foreground">Income: </span>
-                                <span className="font-medium">{formatCurrency(app.annualIncome)}</span>
+                                <span className="font-medium">{app.annual_income ? formatCurrency(app.annual_income) : 'N/A'}</span>
                               </div>
                               <div className="text-sm">
                                 <span className="text-muted-foreground">DTI: </span>
-                                <span className="font-medium">{app.dti}%</span>
+                                <span className="font-medium">{app.debt_to_income_ratio ? `${app.debt_to_income_ratio}%` : 'N/A'}</span>
                               </div>
                             </div>
                           </td>
@@ -364,54 +486,62 @@ export function AdminDashboard() {
 
         <TabsContent value="recent" className="mt-6">
           <div className="space-y-4">
-            {mockRecentDecisions.map((decision) => (
-              <Card key={decision.id}>
-                <CardContent className="py-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div
-                        className={`p-2 rounded-full ${
-                          decision.status === 'approved' ? 'bg-green-500/10' : 'bg-red-500/10'
-                        }`}
-                      >
-                        {decision.status === 'approved' ? (
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                        ) : (
-                          <XCircle className="h-5 w-5 text-red-600" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-medium">{decision.memberName}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {decision.type} - {formatCurrency(decision.amount)}
+            {recentDecisions.length > 0 ? (
+              recentDecisions.map((decision) => (
+                <Card key={decision.id}>
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`p-2 rounded-full ${
+                            decision.status === 'approved' ? 'bg-green-500/10' : 'bg-red-500/10'
+                          }`}
+                        >
+                          {decision.status === 'approved' ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-600" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="font-medium">{decision.member_name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {getLoanTypeName(decision.loan_type)} - {formatCurrency(decision.amount)}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <Badge
-                        variant="outline"
-                        className={
-                          decision.status === 'approved'
-                            ? 'bg-green-500/10 text-green-600 border-green-500/30'
-                            : 'bg-red-500/10 text-red-600 border-red-500/30'
-                        }
-                      >
-                        {decision.status === 'approved' ? 'Approved' : 'Denied'}
-                      </Badge>
-                      <div className="text-sm text-muted-foreground mt-1">
-                        {formatDate(decision.decisionDate)} by {decision.decidedBy}
+                      <div className="text-right">
+                        <Badge
+                          variant="outline"
+                          className={
+                            decision.status === 'approved'
+                              ? 'bg-green-500/10 text-green-600 border-green-500/30'
+                              : 'bg-red-500/10 text-red-600 border-red-500/30'
+                          }
+                        >
+                          {decision.status === 'approved' ? 'Approved' : 'Denied'}
+                        </Badge>
+                        <div className="text-sm text-muted-foreground mt-1">
+                          {formatDate(decision.decision_date)} by {decision.decided_by}
+                        </div>
+                        {decision.status === 'approved' && decision.approved_rate && (
+                          <div className="text-sm text-accent">at {decision.approved_rate}% APR</div>
+                        )}
+                        {decision.status === 'denied' && decision.denial_reason && (
+                          <div className="text-sm text-destructive">{decision.denial_reason}</div>
+                        )}
                       </div>
-                      {decision.status === 'approved' && decision.approvedRate && (
-                        <div className="text-sm text-accent">at {decision.approvedRate}% APR</div>
-                      )}
-                      {decision.status === 'denied' && decision.denialReason && (
-                        <div className="text-sm text-destructive">{decision.denialReason}</div>
-                      )}
                     </div>
-                  </div>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground">No recent decisions</p>
                 </CardContent>
               </Card>
-            ))}
+            )}
           </div>
         </TabsContent>
 
