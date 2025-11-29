@@ -1,0 +1,98 @@
+name: FRED Weekly Crawlers
+
+on:
+  # Run every weekday at 6am UTC (1am EST)
+  schedule:
+    - cron: '0 6 * * 1-5'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      run_all:
+        description: 'Run all crawlers regardless of schedule'
+        type: boolean
+        default: false
+      job_id:
+        description: 'Specific job ID to run (optional)'
+        type: string
+        required: false
+
+jobs:
+  run-crawlers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run FRED Crawlers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "Starting FRED crawler execution..."
+
+          # Build request body
+          if [ "${{ github.event.inputs.job_id }}" != "" ]; then
+            BODY='{"jobId": "${{ github.event.inputs.job_id }}"}'
+          elif [ "${{ github.event.inputs.run_all }}" == "true" ]; then
+            BODY='{"runAll": true}'
+          else
+            BODY='{}'
+          fi
+
+          # Call the crawler Edge Function
+          RESPONSE=$(curl -s -X POST \
+            "$SUPABASE_URL/functions/v1/fred-crawler" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          echo "Response: $RESPONSE"
+
+          # Check for success
+          SUCCESS=$(echo $RESPONSE | jq -r '.success')
+          if [ "$SUCCESS" != "true" ]; then
+            echo "Crawler execution failed!"
+            exit 1
+          fi
+
+          # Log stats
+          echo "Crawlers completed successfully"
+          echo "Total: $(echo $RESPONSE | jq -r '.stats.total')"
+          echo "Success: $(echo $RESPONSE | jq -r '.stats.success')"
+          echo "Failed: $(echo $RESPONSE | jq -r '.stats.failed')"
+          echo "Skipped: $(echo $RESPONSE | jq -r '.stats.skipped')"
+
+  # Generate monthly invoice on the 1st of each month
+  generate-invoice:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 6 1 * *' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Generate Monthly Invoice
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          echo "Generating monthly FRED invoice..."
+
+          # Get previous month
+          YEAR=$(date -d "last month" +%Y)
+          MONTH=$(date -d "last month" +%-m)
+
+          # Call the invoice Edge Function
+          RESPONSE=$(curl -s -X POST \
+            "$SUPABASE_URL/functions/v1/fred-invoice" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"year\": $YEAR, \"month\": $MONTH, \"includeInfrastructure\": true}")
+
+          echo "Response: $RESPONSE"
+
+          # Check for success
+          SUCCESS=$(echo $RESPONSE | jq -r '.success')
+          if [ "$SUCCESS" != "true" ]; then
+            echo "Invoice generation failed!"
+            exit 1
+          fi
+
+          echo "Invoice generated: $(echo $RESPONSE | jq -r '.invoice.invoice_number')"
+          echo "Total: $(echo $RESPONSE | jq -r '.invoice.amounts.total')"
