@@ -1,10 +1,17 @@
 // FRED AI - Financial Research & Executive Decision Assistant
 // Supabase Edge Function for Y-12 Federal Credit Union
+// Uses H200 gpt-oss-120b as primary with OpenAI GPT-4o fallback
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
-// OpenAI API Key from environment variable
+// H200 Server Configuration (Primary - Self-hosted, cost-effective)
+const H200_API_URL = Deno.env.get('H200_API_URL') || 'http://86.38.238.94:8001/v1/chat/completions'
+const H200_MODEL = Deno.env.get('H200_MODEL') || 'gpt-oss-120b'
+const H200_ENABLED = Deno.env.get('H200_ENABLED') !== 'false' // Default enabled
+
+// OpenAI Configuration (Fallback)
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || ''
+const OPENAI_MODEL = 'gpt-4o'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -124,42 +131,99 @@ serve(async (req) => {
       systemMessage += `\n\n## Current Executive Context\n${profile.systemContext}\n\nAddress the executive by name (${profile.name}) and tailor responses to their specific focus areas: ${profile.focus.join(', ')}.`
     }
 
-    // Prepare messages for OpenAI
-    const openaiMessages: ChatMessage[] = [
+    // Prepare messages for AI
+    const aiMessages: ChatMessage[] = [
       { role: 'system', content: systemMessage },
       ...messages
     ]
 
-    // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    let assistantMessage: string
+    let modelUsed: string
+    let usage: unknown
+
+    // Try H200 first (primary - self-hosted, cost-effective)
+    if (H200_ENABLED) {
+      try {
+        console.log('Attempting H200 server:', H200_API_URL)
+        const h200Response = await fetch(H200_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: H200_MODEL,
+            messages: aiMessages,
+            max_tokens: maxTokens,
+            temperature: temperature,
+          }),
+        })
+
+        if (h200Response.ok) {
+          const h200Data = await h200Response.json()
+          assistantMessage = h200Data.choices?.[0]?.message?.content
+          if (assistantMessage) {
+            modelUsed = H200_MODEL
+            usage = h200Data.usage
+            console.log('H200 response successful, model:', H200_MODEL)
+            
+            return new Response(
+              JSON.stringify({
+                success: true,
+                message: assistantMessage,
+                usage: usage,
+                model: modelUsed,
+                provider: 'h200',
+              }),
+              {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            )
+          }
+        }
+        console.log('H200 response not ok, falling back to OpenAI')
+      } catch (h200Error) {
+        console.error('H200 error, falling back to OpenAI:', h200Error)
+      }
+    }
+
+    // Fallback to OpenAI GPT-4o
+    if (!OPENAI_API_KEY) {
+      throw new Error('OpenAI API key not configured and H200 unavailable')
+    }
+
+    console.log('Using OpenAI fallback:', OPENAI_MODEL)
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
-        messages: openaiMessages,
+        model: OPENAI_MODEL,
+        messages: aiMessages,
         max_tokens: maxTokens,
         temperature: temperature,
       }),
     })
 
-    if (!response.ok) {
-      const error = await response.text()
+    if (!openaiResponse.ok) {
+      const error = await openaiResponse.text()
       console.error('OpenAI API error:', error)
-      throw new Error(`OpenAI API error: ${response.status}`)
+      throw new Error(`OpenAI API error: ${openaiResponse.status}`)
     }
 
-    const data = await response.json()
-    const assistantMessage = data.choices?.[0]?.message?.content || 'I apologize, but I was unable to generate a response. Please try again.'
+    const openaiData = await openaiResponse.json()
+    assistantMessage = openaiData.choices?.[0]?.message?.content || 'I apologize, but I was unable to generate a response. Please try again.'
+    modelUsed = openaiData.model
+    usage = openaiData.usage
 
     return new Response(
       JSON.stringify({
         success: true,
         message: assistantMessage,
-        usage: data.usage,
-        model: data.model,
+        usage: usage,
+        model: modelUsed,
+        provider: 'openai',
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
