@@ -11,6 +11,7 @@ import { MemberApplicationsPage } from '@/pages/member/Applications';
 import { LoanApplicationPage } from '@/pages/member/LoanApplication';
 import { MemberProfilePage } from '@/pages/member/Profile';
 import { AdminDashboard } from '@/pages/admin/Dashboard';
+import { FredPage } from '@/pages/Fred';
 import { Toaster } from '@/components/ui/sonner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -46,8 +47,53 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  // For demo purposes, allow all authenticated users to access admin
-  // In production, check user role from database
+  // Check if user has admin role in user_metadata
+  const userRole = (user as { user_metadata?: { role?: string } })?.user_metadata?.role;
+  const isAdmin = userRole === 'admin' || userRole === 'loan_officer' || userRole === 'underwriter';
+
+  if (!isAdmin) {
+    return <Navigate to="/member/dashboard" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+// FRED AI Assistant Route - For Y12 FCU Executives
+// Allows access based on executive email addresses or admin role
+function FredRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Executive email addresses for FRED access
+  const executiveEmails = [
+    'barterburn@ourfsb.com',      // Brian Arterburn - EVP/Chief Sales Officer
+    'dmillaway@y12fcu.org',       // Dustin Millaway - CEO
+    'lboston@y12fcu.org',         // Lynn Boston - SVP/Chief People Officer
+    'jwood@y12fcu.org',           // Jim Wood - SVP/Chief Lending Officer
+    'dylan@concentriccorp.us',    // Demo access for Concentric
+  ];
+
+  const userEmail = user.email?.toLowerCase() || '';
+  const userRole = (user as { user_metadata?: { role?: string } })?.user_metadata?.role;
+  const isAdmin = userRole === 'admin' || userRole === 'loan_officer' || userRole === 'underwriter';
+  const isExecutive = executiveEmails.includes(userEmail);
+
+  // Allow access if user is an executive or has admin role
+  if (!isExecutive && !isAdmin) {
+    return <Navigate to="/member/dashboard" replace />;
+  }
+
   return <>{children}</>;
 }
 
@@ -102,6 +148,16 @@ function AppRoutes() {
             <ProtectedRoute>
               <MemberProfilePage />
             </ProtectedRoute>
+          }
+        />
+
+        {/* FRED AI Assistant - Executive Only */}
+        <Route
+          path="/fred"
+          element={
+            <FredRoute>
+              <FredPage />
+            </FredRoute>
           }
         />
 

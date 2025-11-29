@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,41 +11,23 @@ import {
   CheckCircle,
   XCircle,
   Eye,
+  Loader2,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/services/supabase';
 
-const mockApplications = [
-  {
-    id: '1',
-    type: 'Home Loan',
-    amount: 250000,
-    term: 360,
-    status: 'under_review',
-    submittedDate: '2025-11-20',
-    purpose: 'Purchase primary residence',
-  },
-  {
-    id: '2',
-    type: 'Auto Loan',
-    amount: 35000,
-    term: 60,
-    status: 'approved',
-    submittedDate: '2025-11-10',
-    decisionDate: '2025-11-15',
-    purpose: 'Purchase new vehicle',
-    approvedRate: 5.49,
-  },
-  {
-    id: '3',
-    type: 'Personal Loan',
-    amount: 5000,
-    term: 24,
-    status: 'denied',
-    submittedDate: '2025-10-01',
-    decisionDate: '2025-10-05',
-    purpose: 'Debt consolidation',
-    denialReason: 'Insufficient credit history',
-  },
-];
+interface LoanApplication {
+  id: string;
+  loan_type: string;
+  amount: number;
+  term_months: number;
+  status: string;
+  created_at: string;
+  decision_date?: string;
+  purpose?: string;
+  approved_rate?: number;
+  denial_reason?: string;
+}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -110,16 +93,74 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getLoanTypeName(type: string): string {
+  const typeNames: Record<string, string> = {
+    personal: 'Personal Loan',
+    auto: 'Auto Loan',
+    home: 'Home Loan',
+    business: 'Business Loan',
+  };
+  return typeNames[type] || type;
+}
+
 export function MemberApplicationsPage() {
+  const { user } = useAuth();
   const location = useLocation();
   const showSuccessMessage = location.state?.success;
+  const [applications, setApplications] = useState<LoanApplication[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const pendingApplications = mockApplications.filter(
+  useEffect(() => {
+    async function fetchApplications() {
+      if (!user?.id) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Fetch member data first
+        const { data: memberData } = await supabase
+          .from('members')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
+
+        if (memberData) {
+          // Fetch all applications
+          const { data: applicationsData } = await supabase
+            .from('loan_applications')
+            .select('*')
+            .eq('member_id', memberData.id)
+            .order('created_at', { ascending: false });
+
+          if (applicationsData) {
+            setApplications(applicationsData);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching applications:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchApplications();
+  }, [user?.id]);
+
+  const pendingApplications = applications.filter(
     (app) => ['draft', 'submitted', 'under_review'].includes(app.status)
   );
-  const completedApplications = mockApplications.filter(
+  const completedApplications = applications.filter(
     (app) => ['approved', 'denied', 'funded'].includes(app.status)
   );
+
+  if (isLoading) {
+    return (
+      <div className="container py-8 flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8">
@@ -159,17 +200,17 @@ export function MemberApplicationsPage() {
                         <FileText className="h-6 w-6 text-primary" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-lg">{app.type}</h3>
-                        <p className="text-sm text-muted-foreground">{app.purpose}</p>
+                        <h3 className="font-semibold text-lg">{getLoanTypeName(app.loan_type)}</h3>
+                        <p className="text-sm text-muted-foreground">{app.purpose || 'Loan application'}</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Submitted {formatDate(app.submittedDate)}
+                          Submitted {formatDate(app.created_at)}
                         </p>
                       </div>
                     </div>
                     <div className="flex flex-col md:items-end gap-2">
                       {getStatusBadge(app.status)}
                       <div className="text-xl font-bold">{formatCurrency(app.amount)}</div>
-                      <div className="text-sm text-muted-foreground">{app.term} months</div>
+                      <div className="text-sm text-muted-foreground">{app.term_months} months</div>
                     </div>
                   </div>
                 </CardContent>
@@ -203,19 +244,19 @@ export function MemberApplicationsPage() {
                         <FileText className={`h-6 w-6 ${app.status === 'approved' || app.status === 'funded' ? 'text-accent' : 'text-muted-foreground'}`} />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-lg">{app.type}</h3>
-                        <p className="text-sm text-muted-foreground">{app.purpose}</p>
+                        <h3 className="font-semibold text-lg">{getLoanTypeName(app.loan_type)}</h3>
+                        <p className="text-sm text-muted-foreground">{app.purpose || 'Loan application'}</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Decision: {formatDate(app.decisionDate!)}
+                          Decision: {formatDate(app.decision_date || app.created_at)}
                         </p>
-                        {app.status === 'approved' && app.approvedRate && (
+                        {app.status === 'approved' && app.approved_rate && (
                           <p className="text-sm text-accent mt-1">
-                            Approved at {app.approvedRate}% APR
+                            Approved at {app.approved_rate}% APR
                           </p>
                         )}
-                        {app.status === 'denied' && app.denialReason && (
+                        {app.status === 'denied' && app.denial_reason && (
                           <p className="text-sm text-destructive mt-1">
-                            Reason: {app.denialReason}
+                            Reason: {app.denial_reason}
                           </p>
                         )}
                       </div>

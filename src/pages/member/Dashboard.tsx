@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,48 +13,30 @@ import {
   ArrowRight,
   Plus,
   Bell,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/services/supabase';
 
-const mockLoans = [
-  {
-    id: '1',
-    type: 'Auto Loan',
-    loanNumber: 'AL-2024-001',
-    balance: 18500,
-    originalAmount: 25000,
-    monthlyPayment: 485.50,
-    nextPaymentDate: '2025-12-15',
-    interestRate: 5.49,
-    status: 'active',
-  },
-  {
-    id: '2',
-    type: 'Personal Loan',
-    loanNumber: 'PL-2024-002',
-    balance: 8200,
-    originalAmount: 10000,
-    monthlyPayment: 312.75,
-    nextPaymentDate: '2025-12-01',
-    interestRate: 9.99,
-    status: 'active',
-  },
-];
+interface Loan {
+  id: string;
+  loan_type: string;
+  loan_number: string;
+  current_balance: number;
+  original_amount: number;
+  monthly_payment: number;
+  next_payment_date: string;
+  interest_rate: number;
+  status: string;
+}
 
-const mockApplications = [
-  {
-    id: '1',
-    type: 'Home Loan',
-    amount: 250000,
-    status: 'under_review',
-    submittedDate: '2025-11-20',
-  },
-];
-
-const notifications = [
-  { id: '1', message: 'Your payment of $485.50 is due in 5 days', type: 'reminder' },
-  { id: '2', message: 'Your loan application is being reviewed', type: 'info' },
-];
+interface LoanApplication {
+  id: string;
+  loan_type: string;
+  amount: number;
+  status: string;
+  created_at: string;
+}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -70,12 +53,112 @@ function formatDate(dateString: string): string {
   });
 }
 
+function getLoanTypeName(type: string): string {
+  const typeNames: Record<string, string> = {
+    personal: 'Personal Loan',
+    auto: 'Auto Loan',
+    home: 'Home Loan',
+    business: 'Business Loan',
+  };
+  return typeNames[type] || type;
+}
+
 export function MemberDashboard() {
   const { user } = useAuth();
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [applications, setApplications] = useState<LoanApplication[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [notifications, setNotifications] = useState<{ id: string; message: string; type: string }[]>([]);
+
   const firstName = user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Member';
 
-  const totalBalance = mockLoans.reduce((sum, loan) => sum + loan.balance, 0);
-  const totalMonthlyPayment = mockLoans.reduce((sum, loan) => sum + loan.monthlyPayment, 0);
+  useEffect(() => {
+    async function fetchData() {
+      if (!user?.id) {
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        // Fetch member data first
+        const { data: memberData } = await supabase
+          .from('members')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
+
+        if (memberData) {
+          // Fetch active loans
+          const { data: loansData } = await supabase
+            .from('loans')
+            .select('*')
+            .eq('member_id', memberData.id)
+            .eq('status', 'active');
+
+          if (loansData) {
+            setLoans(loansData);
+            
+            // Generate notifications based on loans
+            const newNotifications: { id: string; message: string; type: string }[] = [];
+            loansData.forEach((loan) => {
+              if (loan.next_payment_date) {
+                const daysUntilPayment = Math.ceil(
+                  (new Date(loan.next_payment_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                );
+                if (daysUntilPayment <= 7 && daysUntilPayment > 0) {
+                  newNotifications.push({
+                    id: `payment-${loan.id}`,
+                    message: `Your payment of ${formatCurrency(loan.monthly_payment)} is due in ${daysUntilPayment} days`,
+                    type: 'reminder',
+                  });
+                }
+              }
+            });
+            setNotifications(newNotifications);
+          }
+
+          // Fetch pending applications
+          const { data: applicationsData } = await supabase
+            .from('loan_applications')
+            .select('*')
+            .eq('member_id', memberData.id)
+            .in('status', ['submitted', 'under_review']);
+
+          if (applicationsData) {
+            setApplications(applicationsData);
+            // Add notification for pending applications
+            if (applicationsData.length > 0) {
+              setNotifications((prev) => [
+                ...prev,
+                {
+                  id: 'app-review',
+                  message: `You have ${applicationsData.length} loan application(s) being reviewed`,
+                  type: 'info',
+                },
+              ]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
+  }, [user?.id]);
+
+  const totalBalance = loans.reduce((sum, loan) => sum + (loan.current_balance || 0), 0);
+  const totalMonthlyPayment = loans.reduce((sum, loan) => sum + (loan.monthly_payment || 0), 0);
+
+  if (isLoading) {
+    return (
+      <div className="container py-8 flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8">
@@ -122,7 +205,7 @@ export function MemberDashboard() {
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totalBalance)}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Across {mockLoans.length} active loans
+              Across {loans.length} active loan{loans.length !== 1 ? 's' : ''}
             </p>
           </CardContent>
         </Card>
@@ -137,7 +220,9 @@ export function MemberDashboard() {
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totalMonthlyPayment)}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Next payment: Dec 1, 2025
+              {loans.length > 0 && loans[0].next_payment_date 
+                ? `Next payment: ${formatDate(loans[0].next_payment_date)}`
+                : 'No upcoming payments'}
             </p>
           </CardContent>
         </Card>
@@ -150,7 +235,7 @@ export function MemberDashboard() {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockLoans.length}</div>
+            <div className="text-2xl font-bold">{loans.length}</div>
             <p className="text-xs text-muted-foreground mt-1">
               All in good standing
             </p>
@@ -165,7 +250,7 @@ export function MemberDashboard() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockApplications.length}</div>
+            <div className="text-2xl font-bold">{applications.length}</div>
             <p className="text-xs text-muted-foreground mt-1">
               Under review
             </p>
@@ -189,42 +274,54 @@ export function MemberDashboard() {
             </Link>
           </CardHeader>
           <CardContent className="space-y-4">
-            {mockLoans.map((loan) => {
-              const progress = ((loan.originalAmount - loan.balance) / loan.originalAmount) * 100;
-              return (
-                <div key={loan.id} className="p-4 rounded-lg border">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h4 className="font-medium">{loan.type}</h4>
-                      <p className="text-sm text-muted-foreground">{loan.loanNumber}</p>
+            {loans.length > 0 ? (
+              loans.map((loan) => {
+                const progress = loan.original_amount > 0 
+                  ? ((loan.original_amount - loan.current_balance) / loan.original_amount) * 100 
+                  : 0;
+                return (
+                  <div key={loan.id} className="p-4 rounded-lg border">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h4 className="font-medium">{getLoanTypeName(loan.loan_type)}</h4>
+                        <p className="text-sm text-muted-foreground">{loan.loan_number}</p>
+                      </div>
+                      <Badge variant="outline" className="bg-accent/10 text-accent border-accent/30">
+                        {loan.interest_rate}% APR
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="bg-accent/10 text-accent border-accent/30">
-                      {loan.interestRate}% APR
-                    </Badge>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Balance</span>
+                        <span className="font-medium">{formatCurrency(loan.current_balance)}</span>
+                      </div>
+                      <Progress value={progress} className="h-2" />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>{progress.toFixed(0)}% paid</span>
+                        <span>of {formatCurrency(loan.original_amount)}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t">
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Next payment: </span>
+                        <span className="font-medium">{loan.next_payment_date ? formatDate(loan.next_payment_date) : 'N/A'}</span>
+                      </div>
+                      <span className="font-semibold text-primary">
+                        {formatCurrency(loan.monthly_payment)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Balance</span>
-                      <span className="font-medium">{formatCurrency(loan.balance)}</span>
-                    </div>
-                    <Progress value={progress} className="h-2" />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{progress.toFixed(0)}% paid</span>
-                      <span>of {formatCurrency(loan.originalAmount)}</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center mt-3 pt-3 border-t">
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Next payment: </span>
-                      <span className="font-medium">{formatDate(loan.nextPaymentDate)}</span>
-                    </div>
-                    <span className="font-semibold text-primary">
-                      {formatCurrency(loan.monthlyPayment)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <div className="text-center py-8">
+                <CreditCard className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground mb-4">No active loans</p>
+                <Link to="/member/applications/new">
+                  <Button variant="outline">Apply for a Loan</Button>
+                </Link>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -244,22 +341,26 @@ export function MemberDashboard() {
               </Link>
             </CardHeader>
             <CardContent>
-              {mockApplications.length > 0 ? (
+              {applications.length > 0 ? (
                 <div className="space-y-4">
-                  {mockApplications.map((app) => (
+                  {applications.map((app) => (
                     <div key={app.id} className="p-4 rounded-lg border">
                       <div className="flex items-start justify-between mb-2">
                         <div>
-                          <h4 className="font-medium">{app.type}</h4>
+                          <h4 className="font-medium">{getLoanTypeName(app.loan_type)}</h4>
                           <p className="text-sm text-muted-foreground">
-                            Submitted {formatDate(app.submittedDate)}
+                            Submitted {formatDate(app.created_at)}
                           </p>
                         </div>
                         <Badge
                           variant="outline"
-                          className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30"
+                          className={
+                            app.status === 'under_review'
+                              ? 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30'
+                              : 'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                          }
                         >
-                          Under Review
+                          {app.status === 'under_review' ? 'Under Review' : 'Submitted'}
                         </Badge>
                       </div>
                       <div className="text-lg font-semibold">

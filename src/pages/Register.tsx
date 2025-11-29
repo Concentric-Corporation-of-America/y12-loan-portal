@@ -76,9 +76,16 @@ export function RegisterPage() {
       if (error) {
         setError(error.message);
       } else {
-        setSuccess(true);
+        // In demo mode, redirect directly to dashboard
+        // In production, show email verification message
+        const isDemo = localStorage.getItem('y12_demo_user') !== null;
+        if (isDemo) {
+          navigate('/member/dashboard');
+        } else {
+          setSuccess(true);
+        }
       }
-    } catch (err) {
+    } catch {
       setError('An unexpected error occurred. Please try again.');
     } finally {
       setIsLoading(false);

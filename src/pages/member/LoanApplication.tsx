@@ -21,6 +21,8 @@ import {
   Briefcase,
   Calculator,
 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/services/supabase';
 
 const loanTypes = [
   { value: 'personal', label: 'Personal Loan', icon: CreditCard, description: 'For personal expenses, debt consolidation, or unexpected costs' },
@@ -61,6 +63,7 @@ function calculateMonthlyPayment(principal: number, annualRate: number, termMont
 }
 
 export function LoanApplicationPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,10 +133,52 @@ export function LoanApplicationPage() {
     setIsSubmitting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (!user?.id) {
+        throw new Error('You must be logged in to submit an application');
+      }
+
+      // Get member ID from user
+      const { data: memberData, error: memberError } = await supabase
+        .from('members')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (memberError || !memberData) {
+        throw new Error('Could not find member profile. Please contact support.');
+      }
+
+      // Calculate debt-to-income ratio if we have the data
+      const annualIncome = parseFloat(formData.annualIncome) || 0;
+      const monthlyExpenses = parseFloat(formData.monthlyExpenses) || 0;
+      const dti = annualIncome > 0 ? Math.round((monthlyExpenses * 12 / annualIncome) * 100) : null;
+
+      // Submit loan application to Supabase
+      const { error: submitError } = await supabase
+        .from('loan_applications')
+        .insert({
+          member_id: memberData.id,
+          loan_type: formData.loanType,
+          amount: parseFloat(formData.amount),
+          term_months: parseInt(formData.term),
+          purpose: formData.purpose,
+          status: 'submitted',
+          annual_income: annualIncome || null,
+          debt_to_income_ratio: dti,
+          employment_status: formData.employmentStatus,
+          employer_name: formData.employer || null,
+          job_title: formData.jobTitle || null,
+        });
+
+      if (submitError) {
+        console.error('Submit error:', submitError);
+        throw new Error('Failed to submit application. Please try again.');
+      }
+
       navigate('/member/applications', { state: { success: true } });
     } catch (err) {
-      setError('Failed to submit application. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to submit application. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
