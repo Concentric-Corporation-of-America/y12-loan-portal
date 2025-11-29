@@ -126,10 +126,10 @@ interface UsageData {
   total_tokens: number
 }
 
-// Pricing configuration (per 1M tokens)
+// Pricing configuration (per 1M tokens) - Usage-based billing
 const PRICING = {
-  'gpt-oss-120b': { prompt: 0, completion: 0 }, // Self-hosted, no per-token cost
-  'gpt-4o': { prompt: 2.50, completion: 10.00 }
+  'gpt-oss-120b': { prompt: 0.50, completion: 1.50 }, // H200 self-hosted pricing
+  'gpt-4o': { prompt: 2.50, completion: 10.00 }       // OpenAI fallback pricing
 }
 
 function calculateCost(usage: UsageData, model: string): number {

@@ -7,11 +7,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
-// Pricing configuration
+// Pricing configuration - Usage-based only, no fixed fees
 const PRICING = {
-  // Self-hosted H200 - fixed infrastructure cost, no per-token
-  h200_infrastructure_monthly: 5000.00, // $5,000/month infrastructure
-  h200_per_token: 0,
+  // Self-hosted H200 - usage-based pricing per 1M tokens
+  h200_prompt_per_1m: 0.50,      // $0.50 per 1M prompt tokens
+  h200_completion_per_1m: 1.50,  // $1.50 per 1M completion tokens
 
   // OpenAI fallback - pay per use
   openai_prompt_per_1m: 2.50,
@@ -35,7 +35,6 @@ interface UsageSummary {
 interface InvoiceRequest {
   year: number
   month: number
-  includeInfrastructure?: boolean
   dryRun?: boolean
 }
 
@@ -71,7 +70,7 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
     // Parse request
-    const { year, month, includeInfrastructure = true, dryRun = false }: InvoiceRequest = await req.json()
+    const { year, month, dryRun = false }: InvoiceRequest = await req.json()
 
     // Validate inputs
     if (!year || !month || month < 1 || month > 12) {
@@ -107,15 +106,9 @@ serve(async (req) => {
     const h200Tokens = usage.reduce((sum, u) => sum + Number(u.h200_tokens), 0)
     const openaiTokens = usage.reduce((sum, u) => sum + Number(u.openai_tokens), 0)
 
-    // Calculate costs
-    let subtotal = usage.reduce((sum, u) => sum + Number(u.total_cost), 0)
-    let infrastructureFee = 0
-
-    if (includeInfrastructure && h200Tokens > 0) {
-      infrastructureFee = PRICING.h200_infrastructure_monthly
-    }
-
-    const total = subtotal + infrastructureFee
+    // Calculate costs - usage-based only
+    const subtotal = usage.reduce((sum, u) => sum + Number(u.total_cost), 0)
+    const total = subtotal // No infrastructure fee, purely usage-based
 
     // Build invoice details
     const details = {
@@ -138,7 +131,8 @@ serve(async (req) => {
         cost: Number(u.total_cost)
       })),
       pricing: {
-        h200_infrastructure: includeInfrastructure ? PRICING.h200_infrastructure_monthly : 0,
+        h200_prompt_per_1m: PRICING.h200_prompt_per_1m,
+        h200_completion_per_1m: PRICING.h200_completion_per_1m,
         openai_prompt_per_1m: PRICING.openai_prompt_per_1m,
         openai_completion_per_1m: PRICING.openai_completion_per_1m
       },
@@ -146,25 +140,16 @@ serve(async (req) => {
         {
           description: `H200 Self-Hosted Inference (${h200Tokens.toLocaleString()} tokens)`,
           quantity: h200Tokens,
-          unit_price: 0,
-          amount: 0
+          unit_price: `$${PRICING.h200_prompt_per_1m}/$${PRICING.h200_completion_per_1m} per 1M`,
+          amount: (h200Tokens / 1000000) * ((PRICING.h200_prompt_per_1m + PRICING.h200_completion_per_1m) / 2)
         },
         {
           description: `OpenAI GPT-4o Fallback (${openaiTokens.toLocaleString()} tokens)`,
           quantity: openaiTokens,
-          unit_price: null, // Mixed pricing
-          amount: subtotal
+          unit_price: `$${PRICING.openai_prompt_per_1m}/$${PRICING.openai_completion_per_1m} per 1M`,
+          amount: (openaiTokens / 1000000) * ((PRICING.openai_prompt_per_1m + PRICING.openai_completion_per_1m) / 2)
         }
       ]
-    }
-
-    if (includeInfrastructure && h200Tokens > 0) {
-      details.line_items.unshift({
-        description: 'H200 GPU Infrastructure (Monthly)',
-        quantity: 1,
-        unit_price: PRICING.h200_infrastructure_monthly,
-        amount: PRICING.h200_infrastructure_monthly
-      })
     }
 
     // If dry run, return preview without creating invoice
@@ -177,7 +162,6 @@ serve(async (req) => {
             billing_period: details.billing_period,
             summary: details.summary,
             subtotal: formatCurrency(subtotal),
-            infrastructure_fee: formatCurrency(infrastructureFee),
             total: formatCurrency(total),
             by_executive: details.by_executive
           }
@@ -213,7 +197,7 @@ serve(async (req) => {
         h200_tokens: h200Tokens,
         openai_tokens: openaiTokens,
         subtotal_usd: subtotal,
-        infrastructure_fee_usd: infrastructureFee,
+        infrastructure_fee_usd: 0, // No infrastructure fee - usage-based only
         total_usd: total,
         status: 'draft',
         due_date: dueDate.toISOString().split('T')[0],
@@ -243,7 +227,6 @@ serve(async (req) => {
           },
           amounts: {
             subtotal: formatCurrency(subtotal),
-            infrastructure_fee: formatCurrency(infrastructureFee),
             total: formatCurrency(total)
           },
           status: 'draft',
