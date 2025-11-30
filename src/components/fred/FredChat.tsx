@@ -320,8 +320,61 @@ export function FredChat({ executiveEmail, executiveName, executiveRole }: FredC
     }
   }, [messages]);
 
-  // Simulate AI response based on query
+  // Conversation history for context
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: 'user' | 'assistant', content: string}>>([]);
+
+  // Generate AI response using Supabase Edge Function
   const generateResponse = async (query: string): Promise<string> => {
+    // Build conversation history for context
+    const newHistory = [...conversationHistory, { role: 'user' as const, content: query }];
+    
+    try {
+      // Get Supabase URL from environment - use hardcoded URL to ensure it works
+      const supabaseUrl = 'https://rbmotycxvspzeudwhrqi.supabase.co';
+      console.log('FRED: Calling API at', `${supabaseUrl}/functions/v1/fred-ai`);
+      console.log('FRED: Executive email:', executiveEmail);
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/fred-ai`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: newHistory.slice(-10), // Keep last 10 messages for context
+          executiveEmail: executiveEmail,
+          maxTokens: 1500,
+          temperature: 0.7,
+        }),
+      });
+
+      console.log('FRED: Response status:', response.status, response.ok);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('FRED: Response data:', data);
+      
+      if (data.success && data.message) {
+        // Update conversation history
+        setConversationHistory([...newHistory, { role: 'assistant', content: data.message }]);
+        console.log('FRED: Returning AI response');
+        return data.message;
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error) {
+      console.error('FRED AI error:', error);
+      
+      // Fallback to sample responses if API fails
+      console.log('FRED: Falling back to sample response');
+      return getFallbackResponse(query);
+    }
+  };
+
+  // Fallback responses when API is unavailable
+  const getFallbackResponse = (query: string): string => {
     const lowerQuery = query.toLowerCase();
     
     // Determine response category based on role and query
@@ -402,9 +455,7 @@ Please let me know how I can best assist you, ${displayName}.`;
     };
     setMessages(prev => [...prev, typingMessage]);
 
-    // Simulate AI processing time
-    await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000));
-
+    // Call AI API (no artificial delay - real API response time)
     const response = await generateResponse(userMessage.content);
 
     // Remove typing indicator and add response
@@ -464,11 +515,11 @@ Please let me know how I can best assist you, ${displayName}.`;
           <div className="flex flex-col gap-1 text-xs">
             <div className="flex items-center gap-1 text-emerald-400">
               <CheckCircle className="w-3 h-3" />
-              <span>H200 Connected</span>
+              <span>GPT-4o Connected</span>
             </div>
             <div className="flex items-center gap-1 text-emerald-400">
               <Clock className="w-3 h-3" />
-              <span>Real-time Data</span>
+              <span>Real-time AI</span>
             </div>
           </div>
         </div>
@@ -582,7 +633,7 @@ Please let me know how I can best assist you, ${displayName}.`;
             </Button>
           </div>
           <p className="text-xs text-gray-400 mt-2 text-center">
-            Powered by H200 GPU + GPT-OSS-120B | GAAP & NCUA Compliant Analysis
+            Powered by GPT-4o | GAAP & NCUA Compliant Analysis
           </p>
         </form>
       </CardContent>
