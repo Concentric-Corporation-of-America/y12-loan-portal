@@ -10,7 +10,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 
 // H200 for embeddings (fallback to OpenAI)
-const H200_EMBEDDING_URL = Deno.env.get('H200_EMBEDDING_URL') || 'http://86.38.238.94:8001/v1/embeddings'
+const H200_EMBEDDING_URL = Deno.env.get('H200_EMBEDDING_URL') || 'https://llm-api-o5l2m2dve.brevlab.com/v1/embeddings'
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || ''
 
 const corsHeaders = {
