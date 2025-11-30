@@ -2,6 +2,31 @@
 
 Last Updated: November 30, 2025
 
+## SOC 2 Type II Certification Status
+
+**Status: INITIATED**
+**Provider: Vanta (https://www.vanta.com)**
+**Demo Request Submitted: November 30, 2025**
+**Target Certification: Q2 2026**
+
+Concentric Corporation has submitted a demo request to Vanta for SOC 2 Type II certification. Vanta will contact dylan@concentriccorp.us to schedule a customized demo and begin the certification process.
+
+**Submitted Information:**
+- Contact: Dylan Baker, CEO
+- Email: dylan@concentriccorp.us
+- Company Size: 1-20 employees
+- Country: United States
+- Primary Interest: Automated Compliance
+- Referral Source: Search Engine
+
+**Next Steps:**
+1. Vanta will schedule a customized demo call
+2. Onboard to Vanta platform and connect integrations (GitHub, Supabase, Vercel)
+3. Complete readiness assessment and gap analysis
+4. Implement any additional controls identified
+5. Begin observation period (3-12 months for Type II)
+6. Complete SOC 2 Type II audit with Vanta-certified auditor
+
 ## Executive Summary
 
 This document tracks the implementation status of vendor qualification requirements for providing software to Y-12 Federal Credit Union, a federally-insured credit union regulated by NCUA.
