@@ -5,7 +5,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 // H200 Server Configuration (Primary - Self-hosted, cost-effective)
-const H200_API_URL = Deno.env.get('H200_API_URL') || 'http://86.38.238.94:8001/v1/chat/completions'
+const H200_API_URL = Deno.env.get('H200_API_URL') || 'https://llm-api-o5l2m2dve.brevlab.com/v1/chat/completions'
 const H200_MODEL = Deno.env.get('H200_MODEL') || 'gpt-oss-120b'
 const H200_ENABLED = Deno.env.get('H200_ENABLED') !== 'false' // Default enabled
 
